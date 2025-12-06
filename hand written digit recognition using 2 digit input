@@ -1,52 +1,198 @@
-import tensorflow as tf
-from tensorflow.keras.datasets import mnist
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Flatten
 import numpy as np
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers
 import matplotlib.pyplot as plt
 
-# Load data
-(x_train, y_train), (x_test, y_test) = mnist.load_data()
-x_train = x_train / 255.0
-x_test = x_test / 255.0
+# ------------------------------
+# 1) Load and preprocess MNIST
+# ------------------------------
+(x_train, y_train), (x_test, y_test) = keras.datasets.mnist.load_data()
 
-# Build model
-model = Sequential([
-    Flatten(input_shape=(28, 28)),
-    Dense(128, activation='relu'),
-    Dense(10, activation='softmax')
-])
+# Normalize and add channel dimension
+x_train = x_train.astype("float32") / 255.0
+x_test  = x_test.astype("float32") / 255.0
 
-model.compile(optimizer='adam',
-              loss='sparse_categorical_crossentropy',
-              metrics=['accuracy'])
+x_train = np.expand_dims(x_train, -1)  # (N, 28, 28, 1)
+x_test  = np.expand_dims(x_test, -1)
 
-model.fit(x_train, y_train, epochs=5)
+num_classes = 10
 
-# Predict TWO digits
-index1 = int(input("Enter 1st test image index (0–9999): "))
-index2 = int(input("Enter 2nd test image index (0–9999): "))
+# ------------------------------
+# 2) Helper to create pairs of digits (two-digit images)
+# ------------------------------
+def make_pairs(images, labels, num_pairs):
+    """
+    Create 'num_pairs' images where each image has two MNIST digits
+    concatenated side-by-side: shape (28, 56, 1).
+    Also return two label arrays for left and right digits.
+    """
+    n = images.shape[0]
+    pair_imgs = []
+    pair_labels_1 = []
+    pair_labels_2 = []
 
-# Show both digits
-plt.figure(figsize=(5,2))
-plt.subplot(1,2,1)
-plt.imshow(x_test[index1], cmap='gray')
-plt.title(f"Actual: {y_test[index1]}")
+    for _ in range(num_pairs):
+        # random indices (with replacement)
+        idx1 = np.random.randint(0, n)
+        idx2 = np.random.randint(0, n)
 
-plt.subplot(1,2,2)
-plt.imshow(x_test[index2], cmap='gray')
-plt.title(f"Actual: {y_test[index2]}")
+        img1 = images[idx1]
+        img2 = images[idx2]
+
+        # concat along width (axis=1): (28, 28, 1) + (28, 28, 1) -> (28, 56, 1)
+        pair_img = np.concatenate([img1, img2], axis=1)
+
+        pair_imgs.append(pair_img)
+        pair_labels_1.append(labels[idx1])
+        pair_labels_2.append(labels[idx2])
+
+    pair_imgs = np.stack(pair_imgs, axis=0)
+    pair_labels_1 = np.array(pair_labels_1)
+    pair_labels_2 = np.array(pair_labels_2)
+    return pair_imgs, pair_labels_1, pair_labels_2
+
+# ------------------------------
+# 3) Build 2-digit train / test data
+# ------------------------------
+num_train_pairs = 60000   # can reduce (e.g., 20000) if training is slow
+num_test_pairs  = 10000
+
+X_train2, y1_train, y2_train = make_pairs(x_train, y_train, num_train_pairs)
+X_test2,  y1_test,  y2_test  = make_pairs(x_test,  y_test,  num_test_pairs)
+
+# One-hot encode labels
+y1_train_oh = keras.utils.to_categorical(y1_train, num_classes)
+y2_train_oh = keras.utils.to_categorical(y2_train, num_classes)
+y1_test_oh  = keras.utils.to_categorical(y1_test,  num_classes)
+y2_test_oh  = keras.utils.to_categorical(y2_test,  num_classes)
+
+print("Train 2-digit images:", X_train2.shape)  # (60000, 28, 56, 1)
+
+# ------------------------------
+# 4) Define the CNN model with two outputs (for the 2 digits)
+# ------------------------------
+input_img = keras.Input(shape=(28, 56, 1))
+
+x = layers.Conv2D(32, (3, 3), activation="relu", padding="same")(input_img)
+x = layers.MaxPooling2D((2, 2))(x)
+x = layers.Conv2D(64, (3, 3), activation="relu", padding="same")(x)
+x = layers.MaxPooling2D((2, 2))(x)
+x = layers.Conv2D(128, (3, 3), activation="relu", padding="same")(x)
+x = layers.Flatten()(x)
+x = layers.Dense(256, activation="relu")(x)
+x = layers.Dropout(0.5)(x)
+
+# Two outputs: left digit and right digit
+digit1_out = layers.Dense(num_classes, activation="softmax", name="digit1")(x)
+digit2_out = layers.Dense(num_classes, activation="softmax", name="digit2")(x)
+
+model = keras.Model(inputs=input_img, outputs=[digit1_out, digit2_out])
+
+model.compile(
+    optimizer="adam",
+    loss={
+        "digit1": "categorical_crossentropy",
+        "digit2": "categorical_crossentropy",
+    },
+    metrics={
+        "digit1": "accuracy",
+        "digit2": "accuracy",
+    },
+)
+
+model.summary()
+
+# ------------------------------
+# 5) Train the model
+# ------------------------------
+history = model.fit(
+    X_train2,
+    {"digit1": y1_train_oh, "digit2": y2_train_oh},
+    validation_data=(X_test2, {"digit1": y1_test_oh, "digit2": y2_test_oh}),
+    epochs=2,          # increase if you want better accuracy
+    batch_size=128,
+)
+
+# ------------------------------
+# 6) Simple test on one random 2-digit image (sample input/output)
+# ------------------------------
+idx = np.random.randint(0, num_test_pairs)
+sample = X_test2[idx:idx+1]   # keep batch dimension
+
+pred1, pred2 = model.predict(sample)
+
+d1 = int(np.argmax(pred1[0]))
+d2 = int(np.argmax(pred2[0]))
+
+print("\n=== Random test sample ===")
+print("True digits     :", y1_test[idx], y2_test[idx])
+print("Predicted digits:", d1, d2)
+
+plt.imshow(X_test2[idx].squeeze(), cmap="gray")
+plt.title(f"True: {y1_test[idx]} {y2_test[idx]} | Pred: {d1} {d2}")
+plt.axis("off")
 plt.show()
 
-# Predict each digit
-img1 = x_test[index1].reshape(1, 28, 28)
-img2 = x_test[index2].reshape(1, 28, 28)
+# ------------------------------
+# 7) INTERACTIVE PART:
+#    Let the user type digits and see model prediction
+# ------------------------------
 
-pred1 = np.argmax(model.predict(img1))
-pred2 = np.argmax(model.predict(img2))
+# Precompute indices of each digit in the original test set
+digit_to_indices = {d: np.where(y_test == d)[0] for d in range(10)}
 
-print("Predicted 1st digit:", pred1)
-print("Predicted 2nd digit:", pred2)
+def build_image_for_two_digits(d1, d2):
+    """
+    Given two digits d1, d2 (e.g., 1 and 7),
+    pick one random MNIST image for each digit from x_test,
+    concatenate them, and return the 2-digit image.
+    """
+    idxs1 = digit_to_indices[d1]
+    idxs2 = digit_to_indices[d2]
+    i1 = np.random.choice(idxs1)
+    i2 = np.random.choice(idxs2)
 
-# Combine — final 2-digit number
-print("Recognized number:", f"{pred1}{pred2}")
+    img1 = x_test[i1]  # (28, 28, 1)
+    img2 = x_test[i2]  # (28, 28, 1)
+
+    two_digit_img = np.concatenate([img1, img2], axis=1)  # (28, 56, 1)
+    return two_digit_img, (d1, d2)
+
+print("\nNow you can test the model with your own digit input!")
+print("Type two digits like 17, 05, 99 (or 'q' to quit).")
+
+while True:
+    user = input("\nEnter two digits (e.g., 17), or 'q' to quit: ").strip()
+
+    if user.lower() == 'q':
+        print("Exiting.")
+        break
+
+    # Check that input is valid: exactly 2 characters and both digits
+    if len(user) != 2 or (not user.isdigit()):
+        print("Please enter exactly two digits, like 17 or 05.")
+        continue
+
+    d1 = int(user[0])
+    d2 = int(user[1])
+
+    # Build an image that contains these two digits
+    test_img, true_digits = build_image_for_two_digits(d1, d2)
+
+    # Model expects batch dimension
+    test_img_batch = np.expand_dims(test_img, axis=0)  # (1, 28, 56, 1)
+
+    p1, p2 = model.predict(test_img_batch)
+    pred_d1 = int(np.argmax(p1[0]))
+    pred_d2 = int(np.argmax(p2[0]))
+
+    print(f"True digits     : {true_digits[0]} {true_digits[1]}")
+    print(f"Predicted digits: {pred_d1} {pred_d2}")
+
+    # Show the image
+    plt.imshow(test_img.squeeze(), cmap="gray")
+    plt.title(f"Input digits: {true_digits[0]} {true_digits[1]}\n"
+              f"Model predicts: {pred_d1} {pred_d2}")
+    plt.axis("off")
+    plt.show()
