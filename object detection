@@ -1,0 +1,26 @@
+!pip install ultralytics
+
+from ultralytics import YOLO
+from google.colab import files
+
+# load YOLO model
+model = YOLO("yolov8n.pt")
+
+# upload your room picture
+uploaded = files.upload()
+image_name = list(uploaded.keys())[0]
+
+# run detection
+results = model(image_name)
+results[0].show()
+
+# print all detected objects
+boxes = results[0].boxes
+names = model.names
+detected_objects = []
+
+for box in boxes:
+    cls = int(box.cls)
+    detected_objects.append(names[cls])
+
+print("Objects detected:", detected_objects)
