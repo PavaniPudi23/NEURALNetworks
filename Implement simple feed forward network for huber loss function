@@ -1,0 +1,123 @@
+# ================================
+# Feed Forward Neural Network
+# With Huber Loss
+# Shows Actual vs Predicted vs Difference
+# ================================
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# Huber Loss
+class HuberLoss:
+    def __init__(self, delta=1.0):
+        self.delta = delta
+
+    def forward(self, y_true, y_pred):
+        self.error = y_pred - y_true
+        abs_error = np.abs(self.error)
+
+        quadratic = np.minimum(abs_error, self.delta)
+        linear = abs_error - quadratic
+
+        loss = 0.5 * quadratic**2 + self.delta * linear
+        return np.mean(loss)
+
+    def backward(self):
+        grad = np.where(
+            np.abs(self.error) <= self.delta,
+            self.error,
+            self.delta * np.sign(self.error)
+        )
+        return grad / self.error.shape[0]
+
+# Dense Layer
+class Dense:
+    def __init__(self, input_dim, output_dim):
+        self.W = np.random.randn(input_dim, output_dim) * np.sqrt(2 / input_dim)
+        self.b = np.zeros((1, output_dim))
+
+    def forward(self, X):
+        self.X = X
+        return np.dot(X, self.W) + self.b
+
+    def backward(self, dZ, lr):
+        dW = np.dot(self.X.T, dZ)
+        db = np.sum(dZ, axis=0, keepdims=True)
+        dX = np.dot(dZ, self.W.T)
+
+        self.W -= lr * dW
+        self.b -= lr * db
+
+        return dX
+
+# ReLU Activation
+class ReLU:
+    def forward(self, X):
+        self.X = X
+        return np.maximum(0, X)
+
+    def backward(self, dA):
+        return dA * (self.X > 0)
+
+# Feed Forward Neural Network
+class FeedForwardNN:
+    def __init__(self, input_dim, hidden_dim):
+        self.fc1 = Dense(input_dim, hidden_dim)
+        self.relu = ReLU()
+        self.fc2 = Dense(hidden_dim, 1)
+        self.loss_fn = HuberLoss(delta=1.0)
+
+    def forward(self, X):
+        out = self.fc1.forward(X)
+        out = self.relu.forward(out)
+        out = self.fc2.forward(out)
+        return out
+
+    def train(self, X, y, epochs=1000, lr=0.01):
+        for epoch in range(epochs):
+            y_pred = self.forward(X)
+            loss = self.loss_fn.forward(y, y_pred)
+
+            grad = self.loss_fn.backward()
+            grad = self.fc2.backward(grad, lr)
+            grad = self.relu.backward(grad)
+            _ = self.fc1.backward(grad, lr)
+
+            if epoch % 200 == 0:
+                print(f"Epoch {epoch}, Huber Loss: {loss:.4f}")
+
+# Dataset
+np.random.seed(0)
+
+X = np.linspace(0, 10, 50).reshape(-1, 1)
+y = 2.5 * X + 1 + np.random.randn(50, 1)
+
+# Train Model
+model = FeedForwardNN(input_dim=1, hidden_dim=10)
+model.train(X, y, epochs=1000, lr=0.01)
+
+# Predictions
+y_pred = model.forward(X)
+
+# Results Table
+results = pd.DataFrame({
+    "Input (X)": X.flatten(),
+    "Actual Value": y.flatten(),
+    "Predicted Value": y_pred.flatten(),
+    "Difference": (y - y_pred).flatten()
+})
+
+print("\nSample Results:")
+print(results.head(10))
+
+# Plot Actual vs Predicted
+plt.figure()
+plt.scatter(X, y, label="Actual")
+plt.plot(X, y_pred, label="Predicted")
+plt.xlabel("Input X")
+plt.ylabel("Value")
+plt.title("Actual vs Predicted using Huber Loss")
+plt.legend()
+plt.show()
+   
