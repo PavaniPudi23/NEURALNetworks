@@ -1,0 +1,106 @@
+# Import NumPy library for numerical operations
+import numpy as np
+
+# -----------------------------
+# Huber Loss Function
+# -----------------------------
+def huber_loss(y_true, y_pred, delta=1.0):
+    # Compute the residual (error) between true and predicted value
+    r = y_true - y_pred
+    
+    # If error magnitude is small (within delta)
+    if abs(r) <= delta:
+        # Use squared loss (quadratic region)
+        return 0.5 * r**2
+    else:
+        # Use linear loss for large errors (robust to outliers)
+        return delta * (abs(r) - 0.5 * delta)
+
+# -----------------------------
+# Gradient of Huber Loss
+# -----------------------------
+def huber_gradient(y_true, y_pred, delta=1.0):
+    # Compute residual in prediction direction
+    r = y_pred - y_true
+    
+    # If error is small, gradient is linear
+    if abs(r) <= delta:
+        return r
+    else:
+        # If error is large, gradient is capped at ±delta
+        return delta * np.sign(r)
+
+# -----------------------------
+# Training Data (y = 2x)
+# -----------------------------
+# Input feature values
+X = np.array([1, 2, 3, 4], dtype=float)
+
+# Target values corresponding to X
+y = np.array([2, 4, 6, 8], dtype=float)
+
+# -----------------------------
+# Initialize Parameters
+# -----------------------------
+# Weight of the linear model (slope)
+w = 0.0
+
+# Bias of the linear model (intercept)
+b = 0.0
+
+# Learning rate controls step size of gradient descent
+learning_rate = 0.1
+
+# Delta threshold for Huber loss
+delta = 1.0
+
+# Number of training iterations
+epochs = 30
+
+# -----------------------------
+# Training Loop
+# -----------------------------
+for epoch in range(epochs):
+    # Reset total loss for each epoch
+    total_loss = 0.0
+    
+    # Loop over each training sample
+    for xi, yi in zip(X, y):
+        # Forward pass: compute prediction
+        y_pred = w * xi + b
+        
+        # Compute loss for current sample
+        loss = huber_loss(yi, y_pred, delta)
+        
+        # Accumulate total loss
+        total_loss += loss
+        
+        # Compute gradient of loss w.r.t prediction
+        grad = huber_gradient(yi, y_pred, delta)
+        
+        # Gradient w.r.t weight (chain rule)
+        dw = grad * xi
+        
+        # Gradient w.r.t bias
+        db = grad
+        
+        # Update weight using gradient descent
+        w -= learning_rate * dw
+        
+        # Update bias using gradient descent
+        b -= learning_rate * db
+    
+    # Print epoch number, loss, and updated parameters
+    print(f"Epoch {epoch+1:02d} | Loss: {total_loss:.4f} | w: {w:.4f} | b: {b:.4f}")
+
+# -----------------------------
+# Testing
+# -----------------------------
+# New input value for testing
+x_test = 5
+
+# Predict output using trained model
+y_test_pred = w * x_test + b
+
+# Print prediction result
+print("\nPrediction for x = 5:", y_test_pred)
