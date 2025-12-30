@@ -1,0 +1,101 @@
+import pandas as pd
+import tensorflow as tf
+from tensorflow.keras.preprocessing.text import Tokenizer
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+import numpy as np
+
+# --- 1. Load Data from CSV ---
+file_path = "spam_data.csv.csv"
+
+# Load the data using pandas
+try:
+    df = pd.read_csv(file_path)
+except FileNotFoundError:
+    print(f"Error: The file {file_path} was not found.")
+    # Exit or provide placeholder data if necessary
+    exit()
+
+# The file inspection showed 'text' for content and 'label_num' for labels.
+# Drop any rows where 'text' or 'label_num' is missing for robustness
+df.dropna(subset=['text', 'label_num'], inplace=True)
+
+emails = df['text'].tolist()
+labels = np.array(df['label_num'].tolist(), dtype=np.int32)
+
+print(f"Loaded {len(emails)} total emails and labels.")
+print("-" * 50)
+
+# --- 2. Tokenization and Padding ---
+print("--- Tokenization and Padding ---")
+# Use OOV token to map unseen words to a known index
+tokenizer = Tokenizer(oov_token="<OOV>")
+tokenizer.fit_on_texts(emails)
+sequences = tokenizer.texts_to_sequences(emails)
+
+# Calculate vocabulary size (+1 for padding/index 0)
+vocab_size = len(tokenizer.word_index) + 1
+
+# Pad sequences to a fixed length
+max_length = 500 # A reasonable length for email bodies
+padded_sequences = pad_sequences(sequences, maxlen=max_length, padding='post', truncating='post')
+
+print(f"Vocabulary Size: {vocab_size}")
+print(f"Sequence Max Length: {max_length}")
+print("-" * 50)
+
+# --- 3. Define and Compile TensorFlow Keras Model ---
+print("--- Defining and Compiling Model ---")
+embedding_dim = 16 # Dimension of the word embedding vector
+
+model = tf.keras.Sequential([
+    # Embedding layer: Maps word indices to dense vectors
+    tf.keras.layers.Embedding(input_dim=vocab_size, output_dim=embedding_dim, input_length=max_length),
+    # GlobalAveragePooling1D: Reduces the sequence dimension by averaging, making it suitable for Dense layers
+    tf.keras.layers.GlobalAveragePooling1D(),
+    tf.keras.layers.Dense(24, activation='relu'),
+    # Output layer: Single unit with sigmoid activation for binary classification (probability)
+    tf.keras.layers.Dense(1, activation='sigmoid')
+])
+
+model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
+model.summary()
+print("-" * 50)
+
+# --- 4. Train Model ---
+print("--- Training Model ---")
+# Split data into training (80%) and testing (20%)
+training_size = int(len(emails) * 0.8)
+train_data = padded_sequences[:training_size]
+train_labels = labels[:training_size]
+test_data = padded_sequences[training_size:]
+test_labels = labels[training_size:]
+
+num_epochs = 5 # Set epochs to 5 for a quick run
+
+print(f"Training on {len(train_data)} samples for {num_epochs} epochs...")
+model.fit(
+    train_data,
+    train_labels,
+    epochs=num_epochs,
+    verbose=1 # Show training progress
+)
+print("Training complete.")
+print("-" * 50)
+
+# --- 5. Test Model ---
+# Evaluate on the held-out test set
+loss, accuracy = model.evaluate(test_data, test_labels, verbose=0)
+print(f"Model evaluation on held-out test set ({len(test_data)} samples):")
+print(f"Loss: {loss:.4f}, Accuracy: {accuracy:.4f}")
+
+# Example prediction on a new email
+test_email_new = ["Limited time offer, click this link now to claim your free reward!"]
+test_sequence = tokenizer.texts_to_sequences(test_email_new)
+test_padded_sequence = pad_sequences(test_sequence, maxlen=max_length, padding='post', truncating='post')
+
+prediction = model.predict(test_padded_sequence, verbose=0)
+prob = float(prediction[0][0])
+
+print(f"\nExample Test Email: '{test_email_new[0]}'")
+print(f"Spam probability: **{prob:.4f}**")
+print("Classification: **SPAM**" if prob > 0.5 else "Classification: **NOT SPAM**")
